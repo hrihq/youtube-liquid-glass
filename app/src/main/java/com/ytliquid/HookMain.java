@@ -28,6 +28,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
@@ -87,6 +88,8 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private static boolean announcedLoad;
     private static boolean announcedResult;
+
+    private View indicatorView;
 
     private Settings settings;
     private XSharedPreferences modulePrefs;
@@ -353,6 +356,8 @@ public class HookMain implements IXposedHookLoadPackage {
             applyBackdropBlur(bar, s.blurRadius, density);
             makeChildrenTransparent(bar);
             hideNativeIndicator(bar);
+            installIndicator(bar, s, density);
+            installDrag(bar, s, density);
             installSelectionGuard(bar, s, density);
 
             selectionState.clear();
@@ -372,8 +377,9 @@ public class HookMain implements IXposedHookLoadPackage {
         int radius = dpToPx(s.cornerRadius, density);
 
         SquircleDrawable background = new SquircleDrawable(
-                Color.argb((int) (s.bgAlpha * 2.55f), 16, 20, 28), radius, 0f, 0f);
-        background.setStrokeWidth(Math.max(1f, 0.6f * density));
+                Color.argb((int) (s.bgAlpha * 2.55f), 20, 26, 36), radius, 0f, 0f);
+        background.setStrokeWidth(Math.max(1f, 0.8f * density));
+        background.setStrokeColor(Color.argb(0x38, 0xFF, 0xFF, 0xFF));
         bar.setBackground(background);
         bar.setElevation(dpToPx(DP_ELEVATION, density));
 
@@ -509,30 +515,124 @@ public class HookMain implements IXposedHookLoadPackage {
     }
 
     private void syncSelection(ViewGroup bar, Settings s, float density) {
-        for (int i = 0; i < bar.getChildCount(); i++) {
-            View child = bar.getChildAt(i);
-            if (!(child instanceof ViewGroup)) continue;
-            ViewGroup menu = (ViewGroup) child;
-            for (int j = 0; j < menu.getChildCount(); j++) {
-                View tab = menu.getChildAt(j);
-                boolean selected = isSelected(tab);
-                Boolean last = selectionState.get(tab);
-                if (last != null && last == selected) continue;
-                selectionState.put(tab, selected);
-                if (selected) {
-                    tab.setBackground(new SquircleDrawable(
-                            s.selectedColor, dpToPx(20, density),
-                            dpToPx(6, density), dpToPx(5, density)));
-                    if (s.animation) {
-                        tab.setScaleX(0.94f);
-                        tab.setScaleY(0.94f);
-                        tab.animate().scaleX(1f).scaleY(1f).setDuration(200L).start();
-                    }
-                } else {
-                    tab.setBackground(new ColorDrawable(Color.TRANSPARENT));
-                }
+        int selected = selectedIndex(bar);
+        updateIndicator(bar, selected);
+
+        ViewGroup menu = findMenu(bar);
+        if (menu == null) return;
+        for (int j = 0; j < menu.getChildCount(); j++) {
+            View tab = menu.getChildAt(j);
+            boolean isSelected = j == selected;
+            Boolean last = selectionState.get(tab);
+            if (last != null && last == isSelected) continue;
+            selectionState.put(tab, isSelected);
+            tab.setBackground(null);
+            if (isSelected && s.animation) {
+                tab.setScaleX(0.94f);
+                tab.setScaleY(0.94f);
+                tab.animate().scaleX(1f).scaleY(1f).setDuration(200L).start();
             }
         }
+    }
+
+    /** Adds the Miuix liquid-glass selection capsule behind the tabs. */
+    private void installIndicator(ViewGroup bar, Settings s, float density) {
+        indicatorView = new View(bar.getContext());
+        int alpha = (int) (255 * 0.28f);
+        int color = Color.argb(alpha, Color.red(s.selectedColor),
+                Color.green(s.selectedColor), Color.blue(s.selectedColor));
+        SquircleDrawable drawable = new SquircleDrawable(
+                color, dpToPx(s.cornerRadius, density), dpToPx(5, density), dpToPx(4, density));
+        drawable.setStrokeWidth(Math.max(1f, 0.8f * density));
+        drawable.setStrokeColor(Color.argb(0x40, 0xFF, 0xFF, 0xFF));
+        indicatorView.setBackground(drawable);
+        try {
+            bar.addView(indicatorView, 0,
+                    new ViewGroup.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT));
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": could not add indicator: " + t);
+            indicatorView = null;
+        }
+    }
+
+    private void updateIndicator(ViewGroup bar, int index) {
+        if (indicatorView == null) return;
+        int count = tabCount(bar);
+        if (count <= 0 || bar.getWidth() <= 0) return;
+        float slot = bar.getWidth() / (float) count;
+        indicatorView.setTranslationX(index * slot);
+        ViewGroup.LayoutParams lp = indicatorView.getLayoutParams();
+        if (lp != null) {
+            lp.width = (int) slot;
+            lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            indicatorView.setLayoutParams(lp);
+        }
+    }
+
+    /** Lets a horizontal drag slide the glass capsule and switch tabs on release. */
+    private void installDrag(final ViewGroup bar, final Settings s, final float density) {
+        bar.setClickable(true);
+        bar.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        updateIndicator(bar, indexAt(bar, event.getX()));
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        updateIndicator(bar, indexAt(bar, event.getX()));
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        int index = indexAt(bar, event.getX());
+                        updateIndicator(bar, index);
+                        View tab = tabAt(bar, index);
+                        if (tab != null) tab.performClick();
+                        return true;
+                    case MotionEvent.ACTION_CANCEL:
+                        updateIndicator(bar, selectedIndex(bar));
+                        return true;
+                }
+                return false;
+            }
+        });
+    }
+
+    private int indexAt(ViewGroup bar, float x) {
+        int count = tabCount(bar);
+        if (count <= 0) return 0;
+        int index = (int) (x / (bar.getWidth() / (float) count));
+        return Math.max(0, Math.min(count - 1, index));
+    }
+
+    private int tabCount(ViewGroup bar) {
+        ViewGroup menu = findMenu(bar);
+        return menu == null ? 0 : menu.getChildCount();
+    }
+
+    private View tabAt(ViewGroup bar, int index) {
+        ViewGroup menu = findMenu(bar);
+        if (menu == null || index < 0 || index >= menu.getChildCount()) return null;
+        return menu.getChildAt(index);
+    }
+
+    private int selectedIndex(ViewGroup bar) {
+        ViewGroup menu = findMenu(bar);
+        if (menu == null) return 0;
+        for (int j = 0; j < menu.getChildCount(); j++) {
+            if (isSelected(menu.getChildAt(j))) return j;
+        }
+        return 0;
+    }
+
+    private ViewGroup findMenu(ViewGroup bar) {
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            View child = bar.getChildAt(i);
+            if (child == indicatorView) continue;
+            if (child instanceof ViewGroup && ((ViewGroup) child).getChildCount() > 0) {
+                return (ViewGroup) child;
+            }
+        }
+        return null;
     }
 
     private static boolean isSelected(View view) {
@@ -550,9 +650,11 @@ public class HookMain implements IXposedHookLoadPackage {
             View child = bar.getChildAt(i);
             if (!(child instanceof ViewGroup)) continue;
             ViewGroup menu = (ViewGroup) child;
+            menu.setClickable(false);
             for (int j = 0; j < menu.getChildCount(); j++) {
                 View tab = menu.getChildAt(j);
                 if (tab instanceof ViewGroup) {
+                    tab.setClickable(false);
                     layoutTabItem((ViewGroup) tab, s, density);
                 }
             }
@@ -699,6 +801,10 @@ public class HookMain implements IXposedHookLoadPackage {
         public void setStrokeWidth(float width) {
             strokeWidth = width;
             stroke.setStrokeWidth(width);
+        }
+
+        public void setStrokeColor(int color) {
+            stroke.setColor(color);
         }
 
         @Override
