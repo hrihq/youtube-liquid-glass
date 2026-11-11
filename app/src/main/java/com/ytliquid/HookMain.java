@@ -13,6 +13,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.renderscript.Allocation;
+import android.renderscript.Element;
+import android.renderscript.RenderScript;
+import android.renderscript.ScriptIntrinsicBlur;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
@@ -225,7 +229,7 @@ public class HookMain implements IXposedHookLoadPackage {
             if (cropW <= 0 || cropH <= 0) return;
 
             Bitmap cropped = Bitmap.createBitmap(snapshot, cropX, cropY, cropW, cropH);
-            Bitmap blurred = blurBitmap(cropped);
+            Bitmap blurred = blurBitmap(cropped, a);
             if (blurred == null) return;
 
             // Subtle white tint so the glass reads on any background.
@@ -261,19 +265,22 @@ public class HookMain implements IXposedHookLoadPackage {
         }
     }
 
-    private Bitmap blurBitmap(Bitmap source) {
+    private Bitmap blurBitmap(Bitmap source, android.content.Context context) {
         if (source == null) return null;
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                Bitmap result = Bitmap.createBitmap(source.getWidth(), source.getHeight(), Bitmap.Config.ARGB_8888);
-                Canvas canvas = new Canvas(result);
-                Paint paint = new Paint();
-                paint.setRenderEffect(RenderEffect.createBlurEffect(BLUR_RADIUS, BLUR_RADIUS, Shader.TileMode.CLAMP));
-                canvas.drawBitmap(source, 0, 0, paint);
-                return result;
-            } catch (Throwable ignored) {
-            }
+        // RenderScript blur — works on every API level, deprecated but reliable.
+        try {
+            RenderScript rs = RenderScript.create(context);
+            Allocation input = Allocation.createFromBitmap(rs, source);
+            Allocation output = Allocation.createTyped(rs, input.getType());
+            ScriptIntrinsicBlur blur = ScriptIntrinsicBlur.create(rs, Element.U8_4(rs));
+            blur.setRadius(BLUR_RADIUS);
+            blur.setInput(input);
+            blur.forEach(output);
+            output.copyTo(source);
+            rs.destroy();
+            return source;
+        } catch (Throwable ignored) {
         }
 
         // Fallback: cheap downscale + upscale blur.
