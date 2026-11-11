@@ -453,6 +453,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 new ViewTreeObserver.OnPreDrawListener() {
                     @Override
                     public boolean onPreDraw() {
+                        layoutTabItems(bar, s, density);
                         syncSelection(bar, s, density);
                         return true;
                     }
@@ -478,7 +479,8 @@ public class HookMain implements IXposedHookLoadPackage {
                 selectionState.put(tab, selected);
                 if (selected) {
                     tab.setBackground(new SelectorDrawable(
-                            dpToPx(20, density), s.selectedColor));
+                            dpToPx(20, density), s.selectedColor,
+                            dpToPx(6, density), dpToPx(5, density)));
                     if (s.animation) {
                         tab.setScaleX(0.94f);
                         tab.setScaleY(0.94f);
@@ -496,15 +498,131 @@ public class HookMain implements IXposedHookLoadPackage {
         return view.isSelected() || view.isActivated();
     }
 
+    /**
+     * Stacks each tab's icon above its label and applies the configured icon size
+     * and label visibility. WhatsApp's own tab layout collapses once the bar is
+     * given a fixed pill height, so the two are re-positioned explicitly.
+     */
+    private void layoutTabItems(ViewGroup bar, Settings s, float density) {
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            View child = bar.getChildAt(i);
+            if (!(child instanceof ViewGroup)) continue;
+            ViewGroup menu = (ViewGroup) child;
+            for (int j = 0; j < menu.getChildCount(); j++) {
+                View tab = menu.getChildAt(j);
+                if (tab instanceof ViewGroup) {
+                    layoutTabItem((ViewGroup) tab, s, density);
+                }
+            }
+        }
+    }
+
+    private void layoutTabItem(ViewGroup tab, Settings s, float density) {
+        View iconContainer = null;
+        View labelsGroup = null;
+
+        for (int i = 0; i < tab.getChildCount(); i++) {
+            View child = tab.getChildAt(i);
+            if (child.getId() != View.NO_ID) {
+                try {
+                    String name = child.getResources().getResourceEntryName(child.getId());
+                    if (name != null) {
+                        if (name.contains("icon_container") || name.contains("icon")) {
+                            iconContainer = child;
+                        } else if (name.contains("labels_group") || name.contains("label")) {
+                            labelsGroup = child;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                    // Id not resolvable.
+                }
+            }
+            if (iconContainer == null && child instanceof FrameLayout) iconContainer = child;
+            if (labelsGroup == null && (child.getClass().getName().contains("BaselineLayout")
+                    || (child instanceof ViewGroup && !(child instanceof FrameLayout)))) {
+                labelsGroup = child;
+            }
+        }
+        if (iconContainer == null && tab.getChildCount() >= 1) iconContainer = tab.getChildAt(0);
+        if (labelsGroup == null && tab.getChildCount() >= 2) labelsGroup = tab.getChildAt(1);
+
+        if (labelsGroup != null) {
+            labelsGroup.setVisibility(s.showLabels ? View.VISIBLE : View.GONE);
+        }
+
+        int itemHeight = tab.getHeight();
+        if (itemHeight <= 0) itemHeight = dpToPx(DP_PILL_HEIGHT + 12, density);
+
+        int iconSize = dpToPx(s.iconSize, density);
+        View iconView = findIconView(iconContainer);
+        if (iconView != null) {
+            ViewGroup.LayoutParams lp = iconView.getLayoutParams();
+            if (lp != null && (lp.width != iconSize || lp.height != iconSize)) {
+                lp.width = iconSize;
+                lp.height = iconSize;
+                iconView.setLayoutParams(lp);
+            }
+        }
+
+        int iconHeight = (iconContainer != null && iconContainer.getHeight() > 0)
+                ? iconContainer.getHeight() : iconSize;
+
+        int labelHeight = 0;
+        if (s.showLabels && labelsGroup != null && labelsGroup.getVisibility() != View.GONE) {
+            labelHeight = labelsGroup.getHeight();
+            if (labelHeight <= 0) labelHeight = dpToPx(16, density);
+        }
+
+        int spacing = dpToPx(2, density);
+        int total = labelHeight > 0 ? iconHeight + spacing + labelHeight : iconHeight;
+        int targetIconTop = Math.max(dpToPx(2, density), (itemHeight - total) / 2);
+
+        if (iconContainer != null) {
+            float offset = targetIconTop - iconContainer.getTop();
+            if (Math.abs(iconContainer.getTranslationY() - offset) > 0.5f) {
+                iconContainer.setTranslationY(offset);
+            }
+        }
+        if (s.showLabels && labelsGroup != null && labelHeight > 0) {
+            int targetLabelTop = targetIconTop + iconHeight + spacing;
+            float offset = targetLabelTop - labelsGroup.getTop();
+            if (Math.abs(labelsGroup.getTranslationY() - offset) > 0.5f) {
+                labelsGroup.setTranslationY(offset);
+            }
+        }
+    }
+
+    private static View findIconView(View container) {
+        if (container == null) return null;
+        if (container instanceof android.widget.ImageView) return container;
+        if (container instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) container;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                if (group.getChildAt(i) instanceof android.widget.ImageView) {
+                    return group.getChildAt(i);
+                }
+            }
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = findIconView(group.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
     /** Rounded MIUI-style selection capsule drawn behind a tab's icon and label. */
     public static final class SelectorDrawable extends Drawable {
 
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
         private final float radius;
+        private final float insetX;
+        private final float insetY;
 
-        public SelectorDrawable(float radius, int color) {
+        public SelectorDrawable(float radius, int color, float insetX, float insetY) {
             this.radius = radius;
+            this.insetX = insetX;
+            this.insetY = insetY;
             paint.setColor(color);
         }
 
@@ -512,7 +630,8 @@ public class HookMain implements IXposedHookLoadPackage {
         public void draw(Canvas canvas) {
             Rect bounds = getBounds();
             if (bounds.isEmpty()) return;
-            rect.set(bounds);
+            rect.set(bounds.left + insetX, bounds.top + insetY,
+                    bounds.right - insetX, bounds.bottom - insetY);
             canvas.drawRoundRect(rect, radius, radius, paint);
         }
 
