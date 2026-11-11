@@ -17,20 +17,23 @@ public final class NavLabels {
     private static final Set<String> LABELS = new HashSet<>(Arrays.asList(
             // Home
             "home", "beranda", "accueil", "inicio", "startseite", "start",
+            "главная", "додому", "головна",
             "首页", "ホーム", "홈",
             // Shorts
             "shorts", "short",
             // Subscriptions
             "subscriptions", "subscription", "langganan", "abonnements",
-            "abonniert", "suscripciones", "订阅", "チャンネル登録", "구독",
+            "abonniert", "suscripciones", "подписки", "підписки", "abonnements",
+            "订阅", "チャンネル登録", "구독",
             // You / profile
             "you", "anda", "profil", "profile", "vous", "tu",
-            "あなた", "プロフィール",
+            "вы", "ви", "ты", "プロフィール", "あなた",
             // Create
-            "create", "buat", "créer", "crear", "作成", "만들기",
+            "create", "buat", "créer", "crear", "создать", "створити",
+            "作成", "만들기",
             // Library
             "library", "koleksi", "bibliothèque", "biblioteca",
-            "媒体库", "ライブラリ"
+            "библиотека", "бібліотека", "媒体库", "ライブラリ"
     ));
 
     private NavLabels() {

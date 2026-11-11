@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
@@ -21,6 +22,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Rect;
+import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -39,7 +41,9 @@ import android.view.ViewOutlineProvider;
 import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.widget.Checkable;
+import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -111,6 +115,8 @@ public class HookMain implements IXposedHookLoadPackage {
     private ScriptIntrinsicBlur blurScript;
     private boolean polling;
     private boolean scrollRefreshScheduled;
+    private static boolean announcedLoad;
+    private static boolean announcedResult;
     private final Runnable scrollRefreshRunnable = new Runnable() {
         @Override
         public void run() {
@@ -190,6 +196,8 @@ public class HookMain implements IXposedHookLoadPackage {
         if (a == null || decor == null) return;
         if (appliedDecors.contains(decor)) return;
 
+        announceLoad(a);
+
         if (decor.getWidth() <= 0 || decor.getHeight() <= 0) {
             scheduleSetup(a, decor, 200L);
             return;
@@ -203,6 +211,8 @@ public class HookMain implements IXposedHookLoadPackage {
                 scheduleSetup(a, decor, RETRY_DELAY_MS);
             } else {
                 XposedBridge.log(TAG + ": no navigation bar found after " + MAX_RETRIES + " attempts");
+                dumpBottomHierarchy(a, decor);
+                announceResult(a, false, null);
             }
             return;
         }
@@ -211,7 +221,104 @@ public class HookMain implements IXposedHookLoadPackage {
         retryCounts.remove(decor);
         XposedBridge.log(TAG + ": navigation bar = " + bar.getClass().getName()
                 + " " + bar.getWidth() + "x" + bar.getHeight());
+        announceResult(a, true, bar.getClass().getName());
         applyNavBar(a, bar);
+    }
+
+    private void announceLoad(Activity a) {
+        if (announcedLoad) return;
+        announcedLoad = true;
+        toast(a, "Miuix Nav Bar: hook aktif");
+    }
+
+    private void announceResult(Activity a, boolean found, String info) {
+        if (announcedResult) return;
+        announcedResult = true;
+        String message = found
+                ? "Miuix Nav Bar: nav bar ditemukan\n" + info
+                : "Miuix Nav Bar: nav bar TIDAK ditemukan";
+        toast(a, message);
+    }
+
+    private void toast(Activity a, String message) {
+        try {
+            Toast.makeText(a.getApplicationContext(), message, Toast.LENGTH_LONG).show();
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": toast failed: " + t);
+        }
+    }
+
+    /**
+     * Logs every view in the bottom 220dp with its resource-entry name, bounds,
+     * child count and content description so a missed detection can be fixed
+     * from logcat alone.
+     */
+    private void dumpBottomHierarchy(Activity a, View decor) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            int[] decorLoc = new int[2];
+            decor.getLocationOnScreen(decorLoc);
+            int screenBottom = decorLoc[1] + decor.getHeight();
+            float density = a.getResources().getDisplayMetrics().density;
+            dumpBottomHierarchy(decor, screenBottom, dp(220, density), 0, sb);
+        } catch (Throwable t) {
+            sb.append("dump failed: ").append(t);
+        }
+        String dump = sb.toString();
+        XposedBridge.log(TAG + ": hierarchy dump:\n" + dump);
+        showDumpDialog(a, dump);
+    }
+
+    private void dumpBottomHierarchy(View v, int screenBottom, int maxDistance, int depth, StringBuilder sb) {
+        if (v == null || depth > 24) return;
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        int bottom = loc[1] + v.getHeight();
+        if (v.getHeight() > 0 && screenBottom - bottom <= maxDistance) {
+            String idName = "";
+            try {
+                if (v.getId() != View.NO_ID) {
+                    idName = v.getResources().getResourceEntryName(v.getId());
+                }
+            } catch (Throwable ignored) {
+                // Id not resolvable.
+            }
+            int children = v instanceof ViewGroup ? ((ViewGroup) v).getChildCount() : 0;
+            sb.append(v.getClass().getName())
+                    .append(" id=").append(idName)
+                    .append(" bounds=[").append(loc[0]).append(',').append(loc[1]).append(',')
+                    .append(loc[0] + v.getWidth()).append(',').append(bottom).append(']')
+                    .append(" children=").append(children)
+                    .append(" cd=").append(v.getContentDescription())
+                    .append(" bg=").append(v.getBackground() != null)
+                    .append('\n');
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                dumpBottomHierarchy(g.getChildAt(i), screenBottom, maxDistance, depth + 1, sb);
+            }
+        }
+    }
+
+    private void showDumpDialog(Activity a, String dump) {
+        try {
+            ScrollView scroll = new ScrollView(a);
+            TextView tv = new TextView(a);
+            tv.setTypeface(Typeface.MONOSPACE);
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+            tv.setText(dump);
+            int pad = dpToPx(a, 12);
+            tv.setPadding(pad, pad, pad, pad);
+            scroll.addView(tv);
+            new AlertDialog.Builder(a)
+                    .setTitle("Miuix Nav Bar - Diagnosa")
+                    .setView(scroll)
+                    .setPositiveButton("Tutup", null)
+                    .show();
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": dump dialog failed: " + t);
+        }
     }
 
     private void scheduleSetup(Activity a, View decor, long delay) {
@@ -289,13 +396,17 @@ public class HookMain implements IXposedHookLoadPackage {
             if (bottomDist < -dp(20, density) || bottomDist > dp(DP_MAX_BOTTOM_DISTANCE, density)) continue;
 
             int childCount = ((ViewGroup) v).getChildCount();
+            int clickableChildren = 0;
+            for (int i = 0; i < childCount; i++) {
+                if (((ViewGroup) v).getChildAt(i).isClickable()) clickableChildren++;
+            }
             Set<String> labels = labelSets.get(v);
             int labelCount = labels == null ? 0 : labels.size();
             boolean classHint = hasClassHint(v);
 
             int score = scoreNavBar(widthRatio, bottomDist, dpHeight, childCount, labelCount, classHint, density);
-            Candidate c = new Candidate(v, score, labelCount, classHint, w * h, v.getClass().getName(),
-                    left, top, right, bottom, childCount);
+            Candidate c = new Candidate(v, score, labelCount, classHint, clickableChildren, w * h,
+                    v.getClass().getName(), left, top, right, bottom, childCount);
             candidates.add(c);
 
             if (score >= 20) {
@@ -311,18 +422,28 @@ public class HookMain implements IXposedHookLoadPackage {
 
         if (best.labelCount >= 3 && best.score >= 60) {
             XposedBridge.log(TAG + ": matched by labels: " + best.name + " labels=" + best.labelCount);
+            clearDescendantBars(best.view, candidates);
             return best.view;
         }
         if (best.labelCount == 2 && best.score >= 55) {
             XposedBridge.log(TAG + ": matched by partial labels: " + best.name + " labels=" + best.labelCount);
+            clearDescendantBars(best.view, candidates);
             return best.view;
         }
         if (best.labelCount == 1 && best.score >= 60) {
             XposedBridge.log(TAG + ": matched by single label: " + best.name + " labels=" + best.labelCount);
+            clearDescendantBars(best.view, candidates);
             return best.view;
         }
         if (best.labelCount == 0 && best.classHint && best.score >= 45) {
             XposedBridge.log(TAG + ": matched by class hint: " + best.name + " score=" + best.score);
+            clearDescendantBars(best.view, candidates);
+            return best.view;
+        }
+        if (best.labelCount == 0 && best.clickableChildren >= 3 && best.score >= 40) {
+            XposedBridge.log(TAG + ": matched structurally: " + best.name
+                    + " score=" + best.score + " clickable=" + best.clickableChildren);
+            clearDescendantBars(best.view, candidates);
             return best.view;
         }
 
@@ -330,6 +451,33 @@ public class HookMain implements IXposedHookLoadPackage {
                 + " labels=" + best.labelCount + " score=" + best.score
                 + " classHint=" + best.classHint);
         return null;
+    }
+
+    /**
+     * When the matched view is a wrapper around the real bar, the inner bar's
+     * own opaque background would hide the capsule. Make every nested
+     * label-bearing container transparent so only the capsule shows.
+     */
+    private void clearDescendantBars(View target, List<Candidate> candidates) {
+        for (Candidate c : candidates) {
+            if (c.view == target || c.labelCount < 3) continue;
+            if (isDescendantOf(c.view, target)) {
+                try {
+                    c.view.setBackground(new ColorDrawable(Color.TRANSPARENT));
+                } catch (Throwable ignored) {
+                    // Not fatal.
+                }
+            }
+        }
+    }
+
+    private boolean isDescendantOf(View v, View ancestor) {
+        ViewParent p = v.getParent();
+        while (p instanceof View) {
+            if (p == ancestor) return true;
+            p = ((View) p).getParent();
+        }
+        return false;
     }
 
     private View findById(Activity a, View decor) {
@@ -422,7 +570,9 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (c.labelCount > best.labelCount) best = c;
             } else if (c.score != best.score) {
                 if (c.score > best.score) best = c;
-            } else if (c.area < best.area) {
+            } else if (c.area > best.area) {
+                // Outermost view that still passes the geometry filter: that is
+                // the bar, not the inner menu row.
                 best = c;
             }
         }
@@ -434,17 +584,19 @@ public class HookMain implements IXposedHookLoadPackage {
         final int score;
         final int labelCount;
         final boolean classHint;
+        final int clickableChildren;
         final int area;
         final String name;
         final int left, top, right, bottom;
         final int childCount;
 
-        Candidate(View view, int score, int labelCount, boolean classHint, int area, String name,
-                  int left, int top, int right, int bottom, int childCount) {
+        Candidate(View view, int score, int labelCount, boolean classHint, int clickableChildren,
+                  int area, String name, int left, int top, int right, int bottom, int childCount) {
             this.view = view;
             this.score = score;
             this.labelCount = labelCount;
             this.classHint = classHint;
+            this.clickableChildren = clickableChildren;
             this.area = area;
             this.name = name;
             this.left = left;
