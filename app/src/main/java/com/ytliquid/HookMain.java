@@ -1,5 +1,6 @@
 package com.ytliquid;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -37,6 +38,7 @@ import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.ViewParent;
 import android.view.ViewTreeObserver;
+import android.widget.Checkable;
 import android.widget.TextView;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -653,13 +655,17 @@ public class HookMain implements IXposedHookLoadPackage {
         View nestedFallback = null;
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
-            if (child.isSelected() || child.isActivated() || child.isChecked()) return child;
+            if (child.isSelected() || child.isActivated() || isChecked(child)) return child;
             if (nestedFallback == null && child instanceof ViewGroup) {
                 View inner = findSelectedItem(child);
                 if (inner != null) nestedFallback = inner;
             }
         }
         return nestedFallback;
+    }
+
+    private boolean isChecked(View v) {
+        return (v instanceof Checkable) && ((Checkable) v).isChecked();
     }
 
     // ------------------------------------------------------------------
