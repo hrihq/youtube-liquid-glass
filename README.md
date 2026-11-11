@@ -29,10 +29,18 @@ Output: `app/build/outputs/apk/debug/app-debug.apk`
 
 ## How it works
 
-The module hooks YouTube's `Activity.onCreate` and `onResume`, traverses the view hierarchy to find the bottom navigation bar, and applies:
-- **RenderEffect blur** (Android 12+) — frosted glass blur
-- **Translucent background** — semi-transparent white with blue tint
-- **Elevation** — depth shadow
+The module hooks YouTube's `Activity.onCreate` and `onResume`, finds the bottom
+navigation bar, and turns it into a floating pill:
+
+1. **Backdrop capture** — the decor view is drawn to a bitmap with the bar
+   hidden, so the bar never samples itself.
+2. **Blur** — the captured region behind the bar is blurred
+   (`RenderEffect.createBlurEffect`, Android 12+) or downscaled/upscaled as a
+   fallback.
+3. **Background** — the blurred bitmap becomes the bar's background, with a
+   subtle white tint. The tab icons are children, so they stay sharp.
+4. **Pill shape** — side margins, `OutlineProvider` round rect, elevation.
+5. **Scroll refresh** — the capture is refreshed (throttled) as the feed scrolls.
 
 ## Notes
 
