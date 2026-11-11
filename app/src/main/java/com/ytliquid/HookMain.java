@@ -117,6 +117,7 @@ public class HookMain implements IXposedHookLoadPackage {
         if (best == null) {
             XposedBridge.log(TAG + ": No nav bar candidate scored >= " + MIN_SCORE
                     + " (screen " + screenWidth + "x" + screenHeight + ")");
+            dumpBottomViews(decor, screenHeight);
             return;
         }
 
@@ -134,6 +135,31 @@ public class HookMain implements IXposedHookLoadPackage {
                 handler.removeCallbacks(reapplyRunnable);
                 handler.postDelayed(reapplyRunnable, 80);
             });
+        }
+    }
+
+    /**
+     * Logs every view inside the bottom 250dp so a failed match can be
+     * diagnosed without another build.
+     */
+    private void dumpBottomViews(View view, int screenHeight) {
+        if (view == null) return;
+        int[] loc = new int[2];
+        view.getLocationOnScreen(loc);
+        int bottom = loc[1] + view.getHeight();
+        if (screenHeight - bottom <= dpToPx(view, 250)) {
+            int children = view instanceof ViewGroup ? ((ViewGroup) view).getChildCount() : 0;
+            XposedBridge.log(TAG + ": bottom-view " + view.getClass().getName()
+                    + " bounds=[" + loc[0] + "," + loc[1] + ","
+                    + (loc[0] + view.getWidth()) + "," + bottom + "]"
+                    + " children=" + children
+                    + " bg=" + (view.getBackground() != null));
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                dumpBottomViews(group.getChildAt(i), screenHeight);
+            }
         }
     }
 
@@ -230,7 +256,27 @@ public class HookMain implements IXposedHookLoadPackage {
                 best = c;
             }
         }
-        return best;
+        if (best != null) return best;
+
+        // Fallback 1: lowest view that holds several children (tab icons).
+        Candidate fallback = null;
+        for (Candidate c : candidates) {
+            if (c.children < 3) continue;
+            if (fallback == null || c.bottom > fallback.bottom) fallback = c;
+        }
+        if (fallback != null) {
+            XposedBridge.log(TAG + ": using child-count fallback: " + fallback.name);
+            return fallback;
+        }
+
+        // Fallback 2: lowest view at all.
+        for (Candidate c : candidates) {
+            if (fallback == null || c.bottom > fallback.bottom) fallback = c;
+        }
+        if (fallback != null) {
+            XposedBridge.log(TAG + ": using lowest-view fallback: " + fallback.name);
+        }
+        return fallback;
     }
 
     /** Turns the bar into a floating pill: side margins + elevation. */
