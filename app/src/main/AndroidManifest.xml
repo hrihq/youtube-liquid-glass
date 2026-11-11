@@ -11,10 +11,11 @@
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
-        <!-- 100+ enables the modern XSharedPreferences support in LSPosed. -->
+        <!-- Legacy rovo89 API (82). LSPosed 101+ only supports API 82 (legacy)
+             and API 101+ (libxposed); API 100 is disabled as incompatible. -->
         <meta-data
             android:name="xposedminversion"
-            android:value="100" />
+            android:value="82" />
         <meta-data
             android:name="xposeddescription"
             android:value="Turn a bottom navigation bar into a floating MIUI/Miuix glass capsule" />

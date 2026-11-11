@@ -8,7 +8,7 @@ restyles the real bar instead of replacing it.
 ## Requirements
 
 - Android device with **LSPosed** installed (root required)
-- LSPosed with API level 100+ (needed for `XSharedPreferences`)
+- LSPosed with API level 82 (legacy rovo89 API) or 101+
 - WhatsApp (`com.whatsapp`) and/or YouTube (`com.google.android.youtube`) installed
 
 ## Install
