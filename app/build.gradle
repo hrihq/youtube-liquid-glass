@@ -10,8 +10,8 @@ android {
         applicationId = "com.ytliquid"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     compileOptions {
@@ -20,12 +20,22 @@ android {
     }
 
     buildTypes {
-        release {
+        debug {
             minifyEnabled = false
         }
+        release {
+            minifyEnabled = false
+            // Sign the release APK with the debug key so it is installable.
+            signingConfig = signingConfigs.debug
+        }
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
     }
 }
 
 dependencies {
     compileOnly("de.robv.android.xposed:api:82")
+    testImplementation("junit:junit:4.13.2")
 }

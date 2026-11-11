@@ -4,22 +4,26 @@
     <application
         android:allowBackup="true"
         android:icon="@android:drawable/sym_def_app_icon"
-        android:label="YouTube Liquid Glass"
+        android:label="YouTube Miuix Nav Bar"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
+        <!-- 93+ enables the modern XSharedPreferences support in LSPosed. -->
         <meta-data
             android:name="xposedminversion"
-            android:value="82" />
+            android:value="93" />
         <meta-data
             android:name="xposeddescription"
-            android:value="Apply MIUI Liquid Glass effect to YouTube navigation bar" />
+            android:value="Turn the YouTube bottom navigation bar into a floating MIUI/Miuix glass capsule" />
         <meta-data
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
+        <meta-data
+            android:name="xposedsharedprefs"
+            android:value="true" />
 
         <activity
             android:name=".MainActivity"
