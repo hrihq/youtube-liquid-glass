@@ -2,6 +2,6 @@
 <resources>
     <string-array name="xposed_scope">
         <item>com.whatsapp</item>
-        <item>com.google.android.youtube</item>
+        <item>com.whatsapp.w4b</item>
     </string-array>
 </resources>
