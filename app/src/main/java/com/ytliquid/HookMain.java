@@ -15,11 +15,13 @@ import android.graphics.Color;
 import android.graphics.ColorFilter;
 import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
+import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -33,6 +35,7 @@ import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.widget.Checkable;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -62,6 +65,12 @@ public class HookMain implements IXposedHookLoadPackage {
     private static final int DP_PILL_HEIGHT = 56;
     private static final int DP_MIN_PILL_HEIGHT = 48;
     private static final int DP_ELEVATION = 12;
+    /** Miuix dims unselected navigation content to 40%. */
+    private static final float MIUIX_UNSELECTED_ALPHA = 0.4f;
+    /** Miuix squircle corner-tile extension: 1.0 = circle, 1.1 = continuous corner. */
+    private static final float SQUIRCLE_EXTENSION = 1.1f;
+    /** Miuix squircle cubic-bezier handle ratio. */
+    private static final float SQUIRCLE_CONTROL = 0.643f;
 
     private static int bottomNavId = -1;
     private static int navigationBarId = -1;
@@ -362,12 +371,9 @@ public class HookMain implements IXposedHookLoadPackage {
     private void applyPillStyle(ViewGroup bar, Settings s, float density) {
         int radius = dpToPx(s.cornerRadius, density);
 
-        GradientDrawable background = new GradientDrawable();
-        background.setShape(GradientDrawable.RECTANGLE);
-        background.setCornerRadius(radius);
-        background.setColor(Color.argb((int) (s.bgAlpha * 2.55f), 16, 20, 28));
-        background.setStroke(Math.max(1, (int) (0.6f * density)),
-                Color.argb(0x22, 0xFF, 0xFF, 0xFF));
+        SquircleDrawable background = new SquircleDrawable(
+                Color.argb((int) (s.bgAlpha * 2.55f), 16, 20, 28), radius, 0f, 0f);
+        background.setStrokeWidth(Math.max(1f, 0.6f * density));
         bar.setBackground(background);
         bar.setElevation(dpToPx(DP_ELEVATION, density));
 
@@ -375,10 +381,46 @@ public class HookMain implements IXposedHookLoadPackage {
         bar.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View view, Outline outline) {
-                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), r);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    outline.setPath(squirclePath(view.getWidth(), view.getHeight(), r));
+                } else {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), r);
+                }
             }
         });
         bar.setClipToOutline(true);
+    }
+
+    /** Appends a Miuix squircle (continuous corner) rounded rectangle. */
+    private static void squirclePath(Path path, float left, float top, float right, float bottom,
+                                     float radius) {
+        float width = right - left;
+        float height = bottom - top;
+        if (width <= 0f || height <= 0f) return;
+
+        float halfMin = Math.min(width, height) * 0.5f;
+        float tile = Math.min(Math.max(radius, 0f) * SQUIRCLE_EXTENSION, halfMin);
+        if (tile <= 0f) {
+            path.addRect(left, top, right, bottom, Path.Direction.CW);
+            return;
+        }
+        float handle = tile * (1f - SQUIRCLE_CONTROL);
+        path.moveTo(left + tile, top);
+        path.lineTo(right - tile, top);
+        path.cubicTo(right - handle, top, right, top + handle, right, top + tile);
+        path.lineTo(right, bottom - tile);
+        path.cubicTo(right, bottom - handle, right - handle, bottom, right - tile, bottom);
+        path.lineTo(left + tile, bottom);
+        path.cubicTo(left + handle, bottom, left, bottom - handle, left, bottom - tile);
+        path.lineTo(left, top + tile);
+        path.cubicTo(left, top + handle, left + handle, top, left + tile, top);
+        path.close();
+    }
+
+    private static Path squirclePath(float width, float height, float radius) {
+        Path path = new Path();
+        squirclePath(path, 0f, 0f, width, height, radius);
+        return path;
     }
 
     /**
@@ -478,8 +520,8 @@ public class HookMain implements IXposedHookLoadPackage {
                 if (last != null && last == selected) continue;
                 selectionState.put(tab, selected);
                 if (selected) {
-                    tab.setBackground(new SelectorDrawable(
-                            dpToPx(20, density), s.selectedColor,
+                    tab.setBackground(new SquircleDrawable(
+                            s.selectedColor, dpToPx(20, density),
                             dpToPx(6, density), dpToPx(5, density)));
                     if (s.animation) {
                         tab.setScaleX(0.94f);
@@ -550,6 +592,14 @@ public class HookMain implements IXposedHookLoadPackage {
             labelsGroup.setVisibility(s.showLabels ? View.VISIBLE : View.GONE);
         }
 
+        boolean selected = isSelected(tab);
+        float alpha = selected ? 1f : MIUIX_UNSELECTED_ALPHA;
+        if (iconContainer != null) iconContainer.setAlpha(alpha);
+        if (labelsGroup != null) {
+            labelsGroup.setAlpha(alpha);
+        }
+        applyLabelStyle(labelsGroup, selected);
+
         int itemHeight = tab.getHeight();
         if (itemHeight <= 0) itemHeight = dpToPx(DP_PILL_HEIGHT + 12, density);
 
@@ -592,6 +642,22 @@ public class HookMain implements IXposedHookLoadPackage {
         }
     }
 
+    private static void applyLabelStyle(View labelsGroup, boolean selected) {
+        if (labelsGroup instanceof TextView) {
+            ((TextView) labelsGroup).setTypeface(null,
+                    selected ? Typeface.BOLD : Typeface.NORMAL);
+        } else if (labelsGroup instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) labelsGroup;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if (child instanceof TextView) {
+                    ((TextView) child).setTypeface(null,
+                            selected ? Typeface.BOLD : Typeface.NORMAL);
+                }
+            }
+        }
+    }
+
     private static View findIconView(View container) {
         if (container == null) return null;
         if (container instanceof android.widget.ImageView) return container;
@@ -610,39 +676,52 @@ public class HookMain implements IXposedHookLoadPackage {
         return null;
     }
 
-    /** Rounded MIUI-style selection capsule drawn behind a tab's icon and label. */
-    public static final class SelectorDrawable extends Drawable {
+    /** Miuix squircle (continuous corner) drawable used for the bar and the selection pill. */
+    public static final class SquircleDrawable extends Drawable {
 
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF rect = new RectF();
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
         private final float radius;
         private final float insetX;
         private final float insetY;
+        private float strokeWidth;
 
-        public SelectorDrawable(float radius, int color, float insetX, float insetY) {
+        public SquircleDrawable(int color, float radius, float insetX, float insetY) {
             this.radius = radius;
             this.insetX = insetX;
             this.insetY = insetY;
-            paint.setColor(color);
+            fill.setColor(color);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setColor(Color.argb(0x22, 0xFF, 0xFF, 0xFF));
+        }
+
+        public void setStrokeWidth(float width) {
+            strokeWidth = width;
+            stroke.setStrokeWidth(width);
         }
 
         @Override
         public void draw(Canvas canvas) {
             Rect bounds = getBounds();
             if (bounds.isEmpty()) return;
-            rect.set(bounds.left + insetX, bounds.top + insetY,
-                    bounds.right - insetX, bounds.bottom - insetY);
-            canvas.drawRoundRect(rect, radius, radius, paint);
+            path.reset();
+            squirclePath(path, bounds.left + insetX, bounds.top + insetY,
+                    bounds.right - insetX, bounds.bottom - insetY, radius);
+            canvas.drawPath(path, fill);
+            if (strokeWidth > 0f) canvas.drawPath(path, stroke);
         }
 
         @Override
         public void setAlpha(int alpha) {
-            paint.setAlpha(alpha);
+            fill.setAlpha(alpha);
+            stroke.setAlpha(alpha);
         }
 
         @Override
         public void setColorFilter(ColorFilter colorFilter) {
-            paint.setColorFilter(colorFilter);
+            fill.setColorFilter(colorFilter);
+            stroke.setColorFilter(colorFilter);
         }
 
         @Override

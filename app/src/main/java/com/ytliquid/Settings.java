@@ -29,9 +29,9 @@ public final class Settings {
     public boolean enabled = true;
     public int blurRadius = 18;
     public int bgAlpha = 45;
-    public int selectedColor = 0xFF2F7BFF;
+    public int selectedColor = 0xFF3482FF;
     public int inactiveColor = 0xFFB8B8B8;
-    public int cornerRadius = 28;
+    public int cornerRadius = 20;
     /** 0 means "keep YouTube's own height". */
     public int barHeight = 0;
     public int sideMargin = 14;
