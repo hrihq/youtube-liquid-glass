@@ -2,6 +2,7 @@ package com.ytliquid;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -65,7 +66,10 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "YT_MiuixNav";
-    private static final String TARGET_PACKAGE = "com.google.android.youtube";
+    /** Packages whose bottom navigation bar should be restyled. */
+    private static final Set<String> TARGET_PACKAGES = new HashSet<String>(Arrays.asList(
+            "com.whatsapp",
+            "com.google.android.youtube"));
     private static final String MODULE_PACKAGE = "com.ytliquid";
 
     private static final int MAX_RETRIES = 25;
@@ -90,6 +94,9 @@ public class HookMain implements IXposedHookLoadPackage {
             "main_bottom_navigation_bar",
             "bottom_navigation_bar_container",
             "bottom_navigation_outer",
+            "bottom_navigation_menu",
+            "design_bottom_navigation_view",
+            "bottom_nav_view",
     };
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -110,6 +117,7 @@ public class HookMain implements IXposedHookLoadPackage {
     private BitmapDrawable blurLayer;
     private Settings lastSettings;
     private XSharedPreferences modulePrefs;
+    private String targetPackage;
 
     private RenderScript renderScript;
     private ScriptIntrinsicBlur blurScript;
@@ -131,8 +139,9 @@ public class HookMain implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
-        if (!TARGET_PACKAGE.equals(lpparam.packageName)) return;
+        if (!TARGET_PACKAGES.contains(lpparam.packageName)) return;
 
+        targetPackage = lpparam.packageName;
         XposedBridge.log(TAG + ": module loaded for " + lpparam.packageName);
 
         XC_MethodHook createHook = new XC_MethodHook() {
@@ -141,7 +150,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 Object obj = param.thisObject;
                 if (!(obj instanceof Activity)) return;
                 Activity a = (Activity) obj;
-                if (!TARGET_PACKAGE.equals(a.getPackageName())) return;
+                if (!TARGET_PACKAGES.contains(a.getPackageName())) return;
                 try {
                     setup(a, a.getWindow().getDecorView());
                 } catch (Throwable t) {
@@ -156,7 +165,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 Object obj = param.thisObject;
                 if (!(obj instanceof Activity)) return;
                 Activity a = (Activity) obj;
-                if (!TARGET_PACKAGE.equals(a.getPackageName())) return;
+                if (!TARGET_PACKAGES.contains(a.getPackageName())) return;
                 try {
                     setup(a, a.getWindow().getDecorView());
                 } catch (Throwable t) {
@@ -481,9 +490,10 @@ public class HookMain implements IXposedHookLoadPackage {
     }
 
     private View findById(Activity a, View decor) {
+        String pkg = targetPackage != null ? targetPackage : a.getPackageName();
         for (String name : BAR_ID_NAMES) {
             try {
-                int id = a.getResources().getIdentifier(name, "id", TARGET_PACKAGE);
+                int id = a.getResources().getIdentifier(name, "id", pkg);
                 if (id == 0) continue;
                 View v = decor.findViewById(id);
                 if (v != null && v.getVisibility() == View.VISIBLE) {

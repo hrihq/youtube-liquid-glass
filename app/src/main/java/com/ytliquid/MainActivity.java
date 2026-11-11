@@ -59,7 +59,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("Miuix Nav Bar untuk YouTube");
+        title.setText("Miuix Nav Bar");
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setPadding(0, 0, 0, dp(8));
@@ -67,9 +67,9 @@ public class MainActivity extends Activity {
 
         TextView status = new TextView(this);
         status.setText(worldReadable
-                ? "Aktifkan modul di LSPosed, pilih scope YouTube, lalu mulai ulang YouTube."
+                ? "Aktifkan modul di LSPosed, pilih scope WhatsApp/YouTube, lalu mulai ulang app."
                 : "Mode world-readable tidak didukung: pengaturan mungkin tidak terbaca modul.\n"
-                + "Aktifkan modul di LSPosed, pilih scope YouTube, lalu mulai ulang YouTube.");
+                + "Aktifkan modul di LSPosed, pilih scope WhatsApp/YouTube, lalu mulai ulang app.");
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         status.setTextColor(worldReadable ? Color.parseColor("#666666") : Color.parseColor("#B3261E"));
         status.setPadding(0, 0, 0, dp(16));

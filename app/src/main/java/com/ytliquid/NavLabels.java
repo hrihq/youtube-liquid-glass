@@ -33,7 +33,12 @@ public final class NavLabels {
             "作成", "만들기",
             // Library
             "library", "koleksi", "bibliothèque", "biblioteca",
-            "библиотека", "бібліотека", "媒体库", "ライブラリ"
+            "библиотека", "бібліотека", "媒体库", "ライブラリ",
+            // WhatsApp
+            "chats", "chat", "obrolan",
+            "updates", "update", "status",
+            "communities", "community", "komunitas",
+            "calls", "call", "panggilan"
     ));
 
     private NavLabels() {

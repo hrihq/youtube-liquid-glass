@@ -1,24 +1,24 @@
-# YouTube Miuix Nav Bar (LSPosed Module)
+# Miuix Nav Bar (LSPosed Module)
 
-Turns YouTube's bottom navigation bar into a floating MIUI/Miuix capsule with a
-blurred glass backdrop, a blue selection pill, and vertical icon + label tabs.
-All original YouTube navigation keeps working — the module restyles the real
-bar instead of replacing it.
+Turns the bottom navigation bar of **WhatsApp** and **YouTube** into a floating
+MIUI/Miuix capsule with a blurred glass backdrop, a blue selection pill, and
+vertical icon + label tabs. All original navigation keeps working — the module
+restyles the real bar instead of replacing it.
 
 ## Requirements
 
 - Android device with **LSPosed** installed (root required)
 - LSPosed with API level 93+ (needed for `XSharedPreferences`)
-- YouTube (`com.google.android.youtube`) installed
+- WhatsApp (`com.whatsapp`) and/or YouTube (`com.google.android.youtube`) installed
 
 ## Install
 
 1. Download the release APK from [Releases](../../releases)
 2. Install the APK
 3. Open **LSPosed Manager** → Modules
-4. Enable **YouTube Miuix Nav Bar**
-5. Set scope to **YouTube** (`com.google.android.youtube`)
-6. Force-stop YouTube and reopen it
+4. Enable **Miuix Nav Bar**
+5. Set scope to **WhatsApp** and/or **YouTube**
+6. Force-stop the app and reopen it
 7. Open the module app to tune blur, margins, colors, height and label visibility
 
 ## Build
@@ -32,13 +32,14 @@ artifacts, and attaches the release APK to a GitHub Release when a tag is pushed
 
 1. **Timing-safe detection** — the module hooks `Activity.onCreate`/`onResume`
    but waits for the decor view to be laid out, then retries for ~8 seconds so
-   YouTube's fragment views have time to be added.
+   the app's fragment views have time to be added.
 2. **Three detection signals** — a resource-id lookup
-   (`bottom_navigation_bar` and friends), then matching of the five real tab
-   labels/content descriptions (`Home`/`Beranda`, `Shorts`, `Subscriptions`/
-   `Langganan`, `You`/`Anda`, `Create`/`Buat`), then a strict structural
-   profile (wide, 36–140dp tall, bottom-anchored, 3–8 children). A view that
-   does not match is never touched.
+   (`bottom_navigation_bar` and friends), then matching of the real tab
+   labels/content descriptions (WhatsApp: `Chats`/`Chat`, `Updates`/`Status`,
+   `Communities`/`Komunitas`, `Calls`/`Panggilan`; YouTube: `Home`/`Beranda`,
+   `Shorts`, `Subscriptions`/`Langganan`, `You`/`Anda`, `Create`/`Buat`), then a
+   strict structural profile (wide, 36–140dp tall, bottom-anchored, 3–8
+   children). A view that does not match is never touched.
 3. **Floating capsule** — side/bottom margins, elevation, a rounded
    `OutlineProvider` and `clipToOutline`.
 4. **Glass backdrop** — the decor view is drawn off-screen with the bar hidden,
