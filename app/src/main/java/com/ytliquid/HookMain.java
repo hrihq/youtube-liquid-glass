@@ -1,15 +1,14 @@
 package com.ytliquid;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
-import android.graphics.Paint;
-import android.graphics.RenderEffect;
-import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -21,7 +20,6 @@ import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
-import android.view.Window;
 import android.view.WindowManager;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -33,10 +31,10 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /**
  * LSPosed module: YouTube MIUI Liquid Glass.
  *
- * Makes YouTube's bottom navigation bar a floating pill with a real backdrop
- * blur: the content behind the bar is captured, blurred, and set as the bar's
- * background. Icons stay sharp because the blur lives on the background only,
- * never on the bar's children.
+ * Finds YouTube's bottom navigation bar, turns it into a floating pill, and
+ * gives it a real backdrop blur: the content behind the bar is captured,
+ * blurred, and set as the bar's background. The tab icons are children, so
+ * they stay sharp — the blur never touches them.
  */
 public class HookMain implements IXposedHookLoadPackage {
 
@@ -48,7 +46,7 @@ public class HookMain implements IXposedHookLoadPackage {
     private static final int BOTTOM_MARGIN_DP = 10;
     private static final int ELEVATION_DP = 10;
     private static final int TINT_ALPHA = 50;
-    private static final int MIN_SCORE = 12;
+    private static final int MIN_SCORE = 10;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Activity activity;
@@ -94,19 +92,38 @@ public class HookMain implements IXposedHookLoadPackage {
     private void setup(Activity a, View decor) {
         this.activity = a;
 
-        Window window = a.getWindow();
-        if (window != null) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+        WindowManager wm = (WindowManager) a.getSystemService(android.content.Context.WINDOW_SERVICE);
+        int screenWidth = decor.getWidth();
+        int screenHeight = decor.getHeight();
+        if (wm != null) {
+            android.graphics.Point p = new android.graphics.Point();
+            wm.getDefaultDisplay().getSize(p);
+            screenWidth = p.x;
+            screenHeight = p.y;
         }
 
-        View bar = findNavBar(decor);
-        if (bar == null) {
-            XposedBridge.log(TAG + ": Nav bar not found");
+        List<Candidate> candidates = new ArrayList<>();
+        collectCandidates(decor, candidates, screenWidth, screenHeight);
+
+        // Log every candidate so a miss is diagnosable from logcat alone.
+        for (Candidate c : candidates) {
+            XposedBridge.log(TAG + ": candidate " + c.name
+                    + " score=" + c.score
+                    + " bounds=[" + c.left + "," + c.top + "," + c.right + "," + c.bottom + "]"
+                    + " children=" + c.children);
+        }
+
+        Candidate best = pickBest(candidates);
+        if (best == null) {
+            XposedBridge.log(TAG + ": No nav bar candidate scored >= " + MIN_SCORE
+                    + " (screen " + screenWidth + "x" + screenHeight + ")");
             return;
         }
+
+        View bar = best.view;
         this.navBar = bar;
         XposedBridge.log(TAG + ": Nav bar = " + bar.getClass().getName()
-                + " (" + bar.getWidth() + "x" + bar.getHeight() + ")");
+                + " (" + bar.getWidth() + "x" + bar.getHeight() + ") score=" + best.score);
 
         makeFloating(bar, a);
         applyBackdropBlur(a, bar);
@@ -120,64 +137,100 @@ public class HookMain implements IXposedHookLoadPackage {
         }
     }
 
-    private View findNavBar(View root) {
-        if (!(root instanceof ViewGroup)) return null;
-        ViewGroup group = (ViewGroup) root;
-        View best = null;
-        int bestScore = 0;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            View child = group.getChildAt(i);
-            if (child == null) continue;
-
-            int score = scoreNavBar(child, group);
-            if (score > bestScore) {
-                bestScore = score;
-                best = child;
-            }
-
-            View nested = findNavBar(child);
-            if (nested != null && nested.getParent() instanceof ViewGroup) {
-                int ns = scoreNavBar(nested, (ViewGroup) nested.getParent());
-                if (ns > bestScore) {
-                    bestScore = ns;
-                    best = nested;
-                }
-            }
-        }
-        return bestScore >= MIN_SCORE ? best : null;
+    private static class Candidate {
+        View view;
+        int score;
+        String name;
+        int left, top, right, bottom;
+        int children;
     }
 
-    private int scoreNavBar(View view, ViewGroup parent) {
+    private void collectCandidates(View view, List<Candidate> out, int screenWidth, int screenHeight) {
+        if (view == null) return;
+
+        int[] loc = new int[2];
+        view.getLocationOnScreen(loc);
+        int left = loc[0];
+        int top = loc[1];
+        int right = left + view.getWidth();
+        int bottom = top + view.getHeight();
+
+        int children = 0;
+        if (view instanceof ViewGroup) children = ((ViewGroup) view).getChildCount();
+
+        int score = scoreNavBar(view, left, top, right, bottom, children, screenWidth, screenHeight);
+        if (score > 0) {
+            Candidate c = new Candidate();
+            c.view = view;
+            c.score = score;
+            c.name = view.getClass().getName();
+            c.left = left;
+            c.top = top;
+            c.right = right;
+            c.bottom = bottom;
+            c.children = children;
+            out.add(c);
+        }
+
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                collectCandidates(group.getChildAt(i), out, screenWidth, screenHeight);
+            }
+        }
+    }
+
+    /**
+     * Scores a view against the bottom-navigation-bar profile, using absolute
+     * screen bounds so a tall parent cannot make a top toolbar look "at the
+     * bottom".
+     */
+    private int scoreNavBar(View view, int left, int top, int right, int bottom,
+                            int children, int screenWidth, int screenHeight) {
         int score = 0;
         try {
-            int h = view.getHeight();
-            int w = view.getWidth();
-            int parentH = parent.getHeight();
-            int parentW = parent.getWidth();
-            int top = view.getTop();
+            int w = right - left;
+            int h = bottom - top;
             String name = view.getClass().getName().toLowerCase();
 
-            // Sits at the bottom of its parent.
-            if (parentH > 0 && top >= parentH - h - dpToPx(view, 40)) score += 10;
+            // Bottom edge must be near the bottom of the screen.
+            int distFromBottom = screenHeight - bottom;
+            int maxDist = dpToPx(view, 140);
+            if (distFromBottom >= -dpToPx(view, 20) && distFromBottom <= maxDist) score += 10;
 
             // Height in the typical bottom-bar range.
-            if (h >= dpToPx(view, 40) && h <= dpToPx(view, 100)) score += 5;
+            if (h >= dpToPx(view, 40) && h <= dpToPx(view, 110)) score += 5;
 
             // Spans most of the width.
-            if (parentW > 0 && w >= parentW * 0.7f) score += 3;
+            if (w >= screenWidth * 0.6f) score += 3;
 
-            // Class-name hints.
+            // Class-name hints (bottom bar, not a top toolbar).
             if (name.contains("bottomnavigation") || name.contains("bottombar")
                     || name.contains("navigationbar") || name.contains("navbar")
                     || name.contains("tabbar") || name.contains("bottomnav")) score += 4;
-            if (name.contains("linearlayout") || name.contains("framelayout")
-                    || name.contains("relativelayout") || name.contains("constraintlayout")) score += 1;
 
             // Holds several children (the tab icons).
-            if (view instanceof ViewGroup && ((ViewGroup) view).getChildCount() >= 3) score += 3;
+            if (children >= 3) score += 3;
+
+            // A bar usually has a solid or translucent background.
+            if (view.getBackground() != null) score += 2;
         } catch (Throwable ignored) {
         }
         return score;
+    }
+
+    private Candidate pickBest(List<Candidate> candidates) {
+        Candidate best = null;
+        for (Candidate c : candidates) {
+            if (c.score < MIN_SCORE) continue;
+            if (best == null || c.score > best.score) {
+                best = c;
+            } else if (c.score == best.score && c.bottom > best.bottom) {
+                // Tie-break: the lower view wins.
+                best = c;
+            }
+        }
+        return best;
     }
 
     /** Turns the bar into a floating pill: side margins + elevation. */
