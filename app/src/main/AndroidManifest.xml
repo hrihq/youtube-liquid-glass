@@ -11,13 +11,13 @@
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
-        <!-- 93+ enables the modern XSharedPreferences support in LSPosed. -->
+        <!-- 100+ enables the modern XSharedPreferences support in LSPosed. -->
         <meta-data
             android:name="xposedminversion"
-            android:value="93" />
+            android:value="100" />
         <meta-data
             android:name="xposeddescription"
-            android:value="Turn the YouTube bottom navigation bar into a floating MIUI/Miuix glass capsule" />
+            android:value="Turn a bottom navigation bar into a floating MIUI/Miuix glass capsule" />
         <meta-data
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
