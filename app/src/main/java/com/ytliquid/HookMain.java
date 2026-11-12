@@ -10,6 +10,7 @@ import java.util.WeakHashMap;
 import android.app.Activity;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
@@ -33,6 +34,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.ViewParent;
+import android.view.ViewConfiguration;
 import android.view.ViewTreeObserver;
 import android.widget.Checkable;
 import android.widget.FrameLayout;
@@ -90,6 +92,8 @@ public class HookMain implements IXposedHookLoadPackage {
     private static boolean announcedResult;
 
     private View indicatorView;
+    private final WeakHashMap<View, float[]> dragState = new WeakHashMap<View, float[]>();
+    private int touchSlop = 24;
 
     private Settings settings;
     private XSharedPreferences modulePrefs;
@@ -516,7 +520,7 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private void syncSelection(ViewGroup bar, Settings s, float density) {
         int selected = selectedIndex(bar);
-        updateIndicator(bar, selected);
+        updateIndicator(bar, selected, density);
 
         ViewGroup menu = findMenu(bar);
         if (menu == null) return;
@@ -538,13 +542,14 @@ public class HookMain implements IXposedHookLoadPackage {
     /** Adds the Miuix liquid-glass selection capsule behind the tabs. */
     private void installIndicator(ViewGroup bar, Settings s, float density) {
         indicatorView = new View(bar.getContext());
-        int alpha = (int) (255 * 0.28f);
+        // Miuix GlassNavigationBar indicator: primary colour at a low alpha (12-26%).
+        int alpha = (int) (255 * 0.16f);
         int color = Color.argb(alpha, Color.red(s.selectedColor),
                 Color.green(s.selectedColor), Color.blue(s.selectedColor));
         SquircleDrawable drawable = new SquircleDrawable(
-                color, dpToPx(s.cornerRadius, density), dpToPx(5, density), dpToPx(4, density));
-        drawable.setStrokeWidth(Math.max(1f, 0.8f * density));
-        drawable.setStrokeColor(Color.argb(0x40, 0xFF, 0xFF, 0xFF));
+                color, dpToPx(s.cornerRadius, density), dpToPx(5, density), dpToPx(3, density));
+        drawable.setStrokeWidth(Math.max(1f, 0.7f * density));
+        drawable.setStrokeColor(Color.argb(0x2E, 0xFF, 0xFF, 0xFF));
         indicatorView.setBackground(drawable);
         try {
             bar.addView(indicatorView, 0,
@@ -555,46 +560,72 @@ public class HookMain implements IXposedHookLoadPackage {
         }
     }
 
-    private void updateIndicator(ViewGroup bar, int index) {
+    private void updateIndicator(ViewGroup bar, int index, float density) {
         if (indicatorView == null) return;
         int count = tabCount(bar);
         if (count <= 0 || bar.getWidth() <= 0) return;
         float slot = bar.getWidth() / (float) count;
-        indicatorView.setTranslationX(index * slot);
+        float overhang = dpToPx(5, density);
+        indicatorView.setTranslationX(index * slot - overhang);
         ViewGroup.LayoutParams lp = indicatorView.getLayoutParams();
         if (lp != null) {
-            lp.width = (int) slot;
+            lp.width = (int) (slot + overhang * 2f);
             lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
             indicatorView.setLayoutParams(lp);
         }
     }
 
-    /** Lets a horizontal drag slide the glass capsule and switch tabs on release. */
+    /**
+     * Horizontal drag slides the glass capsule. Implemented through
+     * {@code onInterceptTouchEvent} so a plain tap still reaches the native tab
+     * (and keeps working); only a real horizontal move is intercepted.
+     */
     private void installDrag(final ViewGroup bar, final Settings s, final float density) {
-        bar.setClickable(true);
-        bar.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        updateIndicator(bar, indexAt(bar, event.getX()));
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        updateIndicator(bar, indexAt(bar, event.getX()));
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                        int index = indexAt(bar, event.getX());
-                        updateIndicator(bar, index);
-                        View tab = tabAt(bar, index);
-                        if (tab != null) tab.performClick();
-                        return true;
-                    case MotionEvent.ACTION_CANCEL:
-                        updateIndicator(bar, selectedIndex(bar));
-                        return true;
-                }
-                return false;
-            }
-        });
+        touchSlop = ViewConfiguration.get(bar.getContext()).getScaledTouchSlop();
+        dragState.put(bar, new float[3]);
+        try {
+            XposedHelpers.findAndHookMethod(bar.getClass(), "onInterceptTouchEvent",
+                    MotionEvent.class, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (param.thisObject != bar) return;
+                            MotionEvent ev = (MotionEvent) param.args[0];
+                            float[] state = dragState.get(bar);
+                            if (state == null) return;
+                            switch (ev.getActionMasked()) {
+                                case MotionEvent.ACTION_DOWN:
+                                    state[0] = ev.getX();
+                                    state[1] = ev.getY();
+                                    state[2] = 0f;
+                                    break;
+                                case MotionEvent.ACTION_MOVE:
+                                    if (state[2] == 0f
+                                            && Math.abs(ev.getX() - state[0]) > touchSlop) {
+                                        state[2] = 1f;
+                                    }
+                                    if (state[2] == 1f) {
+                                        updateIndicator(bar, indexAt(bar, ev.getX()), density);
+                                    }
+                                    break;
+                                case MotionEvent.ACTION_UP:
+                                    if (state[2] == 1f) {
+                                        int idx = indexAt(bar, ev.getX());
+                                        updateIndicator(bar, idx, density);
+                                        View tab = tabAt(bar, idx);
+                                        if (tab != null) tab.performClick();
+                                    }
+                                    state[2] = 0f;
+                                    break;
+                                case MotionEvent.ACTION_CANCEL:
+                                    state[2] = 0f;
+                                    break;
+                            }
+                            param.setResult(state[2] == 1f);
+                        }
+                    });
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": drag hook failed: " + t);
+        }
     }
 
     private int indexAt(ViewGroup bar, float x) {
@@ -650,11 +681,9 @@ public class HookMain implements IXposedHookLoadPackage {
             View child = bar.getChildAt(i);
             if (!(child instanceof ViewGroup)) continue;
             ViewGroup menu = (ViewGroup) child;
-            menu.setClickable(false);
             for (int j = 0; j < menu.getChildCount(); j++) {
                 View tab = menu.getChildAt(j);
                 if (tab instanceof ViewGroup) {
-                    tab.setClickable(false);
                     layoutTabItem((ViewGroup) tab, s, density);
                 }
             }
@@ -701,6 +730,7 @@ public class HookMain implements IXposedHookLoadPackage {
             labelsGroup.setAlpha(alpha);
         }
         applyLabelStyle(labelsGroup, selected);
+        applyContentTint(tab, iconContainer, labelsGroup, selected, s);
 
         int itemHeight = tab.getHeight();
         if (itemHeight <= 0) itemHeight = dpToPx(DP_PILL_HEIGHT + 12, density);
@@ -740,6 +770,28 @@ public class HookMain implements IXposedHookLoadPackage {
             float offset = targetLabelTop - labelsGroup.getTop();
             if (Math.abs(labelsGroup.getTranslationY() - offset) > 0.5f) {
                 labelsGroup.setTranslationY(offset);
+            }
+        }
+    }
+
+    /** Miuix tints the selected destination with the primary colour, others stay dim. */
+    private static void applyContentTint(View tab, View iconContainer, View labelsGroup,
+                                         boolean selected, Settings s) {
+        int color = selected ? s.selectedColor
+                : Color.argb((int) (255 * MIUIX_UNSELECTED_ALPHA), 255, 255, 255);
+        View icon = findIconView(iconContainer);
+        if (icon instanceof android.widget.ImageView) {
+            ((android.widget.ImageView) icon).setImageTintList(ColorStateList.valueOf(color));
+        }
+        if (labelsGroup instanceof TextView) {
+            ((TextView) labelsGroup).setTextColor(color);
+        } else if (labelsGroup instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) labelsGroup;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if (child instanceof TextView) {
+                    ((TextView) child).setTextColor(color);
+                }
             }
         }
     }
